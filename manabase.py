@@ -41,9 +41,11 @@ from functools import reduce
 
 # Get the most updated AllCards.json from mtgjson.com. Then we use it here.
 import json
-json_data=open('AllCards.json')
-cardDatabase = json.load(json_data)
-json_data.close()
+with open('AllCards.json', encoding='utf-8') as json_file:
+    cardDatabase = json.load(json_file)
+#json_data=open('AllCards.json')
+#cardDatabase = json.load(json_data)
+#json_data.close()
 
 class LineOfPlay:
 	# A line of play is a dictionary that keeps track of a sequence of plays. For example,
@@ -671,7 +673,7 @@ def displayWithPlays(string, lineofplay):
 	"""
 	return string + ' '*(140 - len(string)) + ' Plays: '+str(lineofplay.plays)
 
-def checkManaAvailability(symbolsToAcquire, manaBase, manaSourcesAvailable, urborgIsOut):
+def checkManaAvailability(symbolsToAcquire, manaBase, manaSourcesAvailable, urborgIsOut, castIsDragon = False, castIsLegend = False, isRivazOut = 0, colorsOfLegend = []):
 	"""Input is the list of mana symbols we want to create in order, the manabase 
 	we are working with, and the mana sources that are available to tap for mana. 
 	Returns either True or False depending on whether we can make those mana symbols.
@@ -697,14 +699,19 @@ def checkManaAvailability(symbolsToAcquire, manaBase, manaSourcesAvailable, urbo
 	"""
 	if debug['checkManaAvailability']: print('         Trying to acquire',symbolsToAcquire,'with',manaSourcesAvailable)
 	
-	# TODO: Some things like Nykthos or Sol Ring might make more than one mana; this treats them as making 1!
+	# First necessary condition with the CMC and the number of mana sources
 	cmc = 0
 	for symbol in symbolsToAcquire:
 		if is_int(symbol): 
 			cmc += int(symbol)
 		else:
 			cmc += 1
-	if cmc > len(manaSourcesAvailable):
+	bonus = 0
+	if castIsDragon and isRivazOut:
+		bonus = 1
+	elif isRivazOut:
+		bonus = -1
+	if cmc > len(manaSourcesAvailable) + bonus:
 		if debug['checkManaAvailability']: print('         Thats not possible with this few sources.')
 		return False
 
@@ -721,7 +728,7 @@ def checkManaAvailability(symbolsToAcquire, manaBase, manaSourcesAvailable, urbo
 			else:
 				if debug['checkManaAvailability']: print('         Failure! The last symbol was',lastsymbol,'and we didnt have enough left.')
 				return False
-		elif any([(ManaPool('{'+lastsymbol+'}') in manaBase.manaDatabase[cardName(card)]) for card in manaSourcesAvailable]) or  (lastsymbol is 'B' and urborgIsOut and len(manaSourcesAvailable) > 0):
+		elif any([(ManaPool('{'+lastsymbol+'}') in manaBase.manaDatabase[cardName(card)]) for card in manaSourcesAvailable]) or  (lastsymbol == 'B' and urborgIsOut and len(manaSourcesAvailable) > 0):
 			if debug['checkManaAvailability']: print('         Success! The last symbol was',lastsymbol,'and we found it.')
 			return True
 		else:
@@ -736,8 +743,12 @@ def checkManaAvailability(symbolsToAcquire, manaBase, manaSourcesAvailable, urbo
 			if manaSource in manaSourcesAvailable:
 				# Okay! We will try this -- but here is the thing. We don't try it if it is better than something we already tried.
 				# This is the key optimization. If we tried using "Forest" for {G} and failed, then it is pointless to try using "Temple of Abandon" for the same {G}.
-				if not any([manaSource in manaBase.manaSourcesBetterThan[manaSourceTried] for manaSourceTried in manaSourcesTried]):
-					if ManaPool('{'+nextSymbol+'}') in manaBase.manaDatabase[cardName(manaSource)] or (nextSymbol is 'B' and urborgIsOut):
+				if True: # not any([manaSource in manaBase.manaSourcesBetterThan[manaSourceTried] for manaSourceTried in manaSourcesTried]):
+					if ManaPool('{'+nextSymbol+'}') in manaBase.manaDatabase[cardName(manaSource)] \
+							or (nextSymbol == 'B' and urborgIsOut) \
+							or ((manaSource == "Cavern of Souls") and (castIsDragon)) \
+							or ((manaSource == "Plaza of Heroes") and (castIsLegend)) \
+							or ((manaSource == "Plaza of Heroes") and (nextSymbol in colorsOfLegend)):
 						# It's possible to use this card to satisfy this symbol, so we'll try it.
 						manaSourcesTried.append(manaSource)
 						newsymbolsToAcquire = list(symbolsToAcquire)
@@ -746,9 +757,18 @@ def checkManaAvailability(symbolsToAcquire, manaBase, manaSourcesAvailable, urbo
 						newmanaSourcesAvailable.remove(manaSource)
 						if debug['checkManaAvailability']: print('            With this try we have tried',manaSourcesTried,'for',nextSymbol,'- removing source',manaSource,'for',nextSymbol,': remaining sources',newmanaSourcesAvailable)
 						# The only way this ends is if we find a path through this tree that satisfies the final symbol. If so, we win!
-						if checkManaAvailability(newsymbolsToAcquire, manaBase, newmanaSourcesAvailable, urborgIsOut): return True
+						if checkManaAvailability(newsymbolsToAcquire, manaBase, newmanaSourcesAvailable, urborgIsOut, castIsDragon, castIsLegend, isRivazOut, colorsOfLegend): return True
 				else:
 					if debug['checkManaAvailability']: print('            So far we tried',manaSourcesTried,'for',nextSymbol,'- no point trying',manaSource,'for',nextSymbol)
+
+		# Check the use of Rivaz
+		if castIsDragon and isRivazOut:
+			newsymbolsToAcquire = list(symbolsToAcquire)
+			symbolRemoved = newsymbolsToAcquire.pop(0)
+			newmanaSourcesAvailable = list(manaSourcesAvailable)
+			if debug['checkManaAvailability']: print('            With this try we have tried',manaSourcesTried,'for',nextSymbol,'- removing source',manaSource,'for',nextSymbol,': remaining sources',newmanaSourcesAvailable)
+			if checkManaAvailability(newsymbolsToAcquire, manaBase, newmanaSourcesAvailable, urborgIsOut, castIsDragon, castIsLegend, isRivazOut-1, colorsOfLegend): return True
+
 		# If we get here, then I guess we didn't make it.
 		if debug['checkManaAvailability']: print('         Failure! We couldnt get',symbolsToAcquire,'from',manaSourcesAvailable)		
 		return False
@@ -791,7 +811,7 @@ def userInterface():
 
 		for (i, deckfile) in enumerate(deckdirectory):
 			if whichDeck == i:
-				if mode is 'SingleTrial':
+				if mode == 'SingleTrial':
 					print('Great, we\'ll run one trial of',deckfile,'in slow mode.')
 					trials = 1
 				else:
@@ -1033,7 +1053,7 @@ def runTrials(decksToRun, maxturns, trials, onthedraw, mulligans):
 	# If slowModeWait ever becomes "skip", then we will not wait for keyboard input anymore even in slowmode.
 	slowModeWait = ''
 
-	if trials is 1:
+	if trials == 1:
 		slowMode = True
 	else:
 		slowMode = False
@@ -1273,7 +1293,7 @@ def playTurn(lineofplay, manaBase, spellsthistrial, caststhistrial, lineOfPlayCo
 	def castSpellsUntilWeCant(lineofplay, manaBase, this_turn, spellsthistrial, caststhistrial, lineOfPlayCounter, maxturns):
 		playsWeMadeBeforeGettingHere = lineofplay.plays[this_turn-1]
 		lineOfPlayCounter, caststhistrial, newlinesofplay = castSpells(lineofplay, manaBase, this_turn, spellsthistrial, caststhistrial, lineOfPlayCounter, maxturns)
-		if len(newlinesofplay) is 1 and newlinesofplay[0].plays[this_turn-1] == playsWeMadeBeforeGettingHere:
+		if len(newlinesofplay) == 1 and newlinesofplay[0].plays[this_turn-1] == playsWeMadeBeforeGettingHere:
 			# If we only got one line back and it didn't change, that means we are done.
 			return lineOfPlayCounter, caststhistrial, newlinesofplay
 		else:
@@ -1438,6 +1458,18 @@ def playLand(lineofplay,this_turn,manaBase,spellsthistrial,caststhistrial,lineOf
 					if comes_into_play_tapped:
 						card_to_play = '(Tapped) '+card_to_play
 
+				# Fastland
+				if cardName(card_to_play) in ['Seachrome Coast', 'Razorverge Thicket', 'Darkslick Shores', 'Blackcleave Cliffs', 'Copperline Gorge', 'Concealed Courtyard', 'Inspiring Vantage', 'Spirebluff Canal', 'Botanical Sanctum', 'Blooming Marsh']	and this_turn > 3:
+					card_to_play = '(Tapped) '+card_to_play
+
+				# Slowlands
+				if cardName(card_to_play) in ['Deserted Beach', 'Shipwreck Marsh', 'Haunted Ridge', 'Rockfall Vale', 'Overgrown Farmland', 'Shattered Sanctum', 'Stormcarved Coast', 'Deathcap Glade', 'Sundown Pass', 'Dreamroot Cascade'] and this_turn < 3:
+					card_to_play = '(Tapped) '+card_to_play
+
+				# Triomes and manlands
+				if cardName(card_to_play) in ['Restless Anchorage', 'Restless Reef', 'Restless Vents', 'Restless Ridgeline', 'Restless Prairie', 'Restless Fortress ', 'Restless Spire', 'Restless Cottage', 'Restless Bivouac', 'Restless Vinestalk', "Spara's Headquarters", "Raffine's Tower", "Xander's Lounge", "Ziatora's Proving Ground", "Jetmir's Garden"]:
+					card_to_play = '(Tapped) '+card_to_play
+
 				if playing_from_top_of_deck:
 					newlineofplay.plays[this_turn-1].append(card_to_play)
 				else:
@@ -1546,9 +1578,35 @@ def castSpells(lineofplay, manaBase, turn, spellsthistrial, caststhistrial, line
 		if symbolsToAcquire == []:
 			symbolsToAcquire = ['0']
 
-		# This function recursively tries to acquire all these symbols given these mana sources. If Urborg is in any of the plays, pass True in the urborg slot.
+		# Preprocessing for checkManaAvailability
+		if 'subtypes' in cardDatabase[cardName(card)]:
+			dragon_present = 'Dragon' in cardDatabase[cardName(card)]['subtypes']
+		else:
+			dragon_present = False
+
+		if 'supertypes' in cardDatabase[cardName(card)]:
+			legendary_present = 'Legendary' in cardDatabase[cardName(card)]['supertypes']
+		else:
+			legendary_present = False
+		legendary_colors = []
+		for spell in lineofplay.hand:
+			card_name = cardName(spell)
+			if not isLand(spell) and 'supertypes' in cardDatabase[card_name]:
+				if 'Legendary' in cardDatabase[card_name]['supertypes'] and 'cmc' in cardDatabase[card_name]:
+					if cardDatabase[card_name]['cmc'] < turn:
+						if 'manaCost' in cardDatabase[card_name]:
+							legendary_colors.extend([color for color in cardDatabase[card_name]['manaCost']])
+		allowed_colors = {'W', 'U', 'B', 'R', 'G'}
+		legendary_colors = list(set(legendary_colors) & allowed_colors)
+
+		# This function recursively tries to acquire all these symbols given these mana sources.
 		if debug['checkManaAvailability']: print('         Starting the chain, trying to get',symbolsToAcquire,'from',manaSources)
-		isCastable = checkManaAvailability(symbolsToAcquire, manaBase, manaSources, any('Urborg, Tomb of Yawgmoth' in play for play in lineofplay.plays))
+		isCastable = checkManaAvailability(symbolsToAcquire, manaBase, manaSources,
+							  any('Urborg, Tomb of Yawgmoth' in play for play in lineofplay.plays),
+							  dragon_present,
+							  legendary_present,
+							  2 if any('Rivaz of the Claw' in play for play in lineofplay.plays) else 0,
+							  legendary_colors)
 
 		if isCastable:
 			if slowMode: print(spacing(turn, lineOfPlayCounter)+'Successfully paid cost for',card,'... we found',manaCost,'in', manaSources,'on turn '+str(turn)+'.')
@@ -1891,7 +1949,7 @@ def displayResults(displaycasts = None, displaydrawsdictionary = None, displaydr
 				if displaycasts[i][card] >= 5 and (numberofdraws-displaycasts[i][card]) >= 5 and numberofdraws >= 30 and error >= 0.0005:
 					# Only actually display the margin of error if it is at least 0.1% and if the statistics tells us this is even meaningful.
 					if 'text' in displayformat: percents[card] += ('+-' + '{:<6.1%}'.format(error))
-					if 'html' in displayformat: percents[card] += ('&plusmn;' + '{:.1%}'.format(error) + '</td>')
+					#if 'html' in displayformat: percents[card] += ('&plusmn;' + '{:.1%}'.format(error) + '</td>')
 					if 'reddit' in displayformat: percents[card] += ('±' + '{:.1%}'.format(error))
 
 				elif error < 0.0005:
@@ -1900,7 +1958,7 @@ def displayResults(displaycasts = None, displaydrawsdictionary = None, displaydr
 				else:
 					# If the problem is a small sample size, go with plus or minus question mark.
 					if 'text' in displayformat: percents[card] += '+-???%  '
-					if 'html' in displayformat: percents[card] += ('&plusmn;' + '???%')
+					#if 'html' in displayformat: percents[card] += ('&plusmn;' + '???%')
 					if 'reddit' in displayformat: percents[card] += ('±???%')
 
 		if 'html' in displayformat: percents[card] += '</tr>'

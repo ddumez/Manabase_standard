@@ -1,3 +1,6 @@
+This is a fork of Chris-Cunningham works, who himself worked on the basis of Frank Karsten's seminal paper on the subject (see CFB)
+
+
 Manabase
 ========
 
@@ -58,3 +61,32 @@ See Also
 ========
 
 In case it wasn't clear, this kind of analysis is definitely inspired by Frank Karsten's Frank Analysis series, especially the article here: http://www.channelfireball.com/articles/frank-analysis-how-many-colored-mana-sources-do-you-need-to-consistently-cast-your-spells/ . 
+
+
+=========================================================
+Purpose of the branch : adapt this simulator to the current standard
+I modified it to simulate the interactions between dragons, plaza of heroes, cavern of souls, Rivaz of the claw, and classic standard lands as follow :
+
+parse irencrag OK
+parse rivaz OK
+parse cavern OK
+parse plaza OK
+prototype checkManaAvailability OK
+call checkManaAvailability OK
+implement rivaz OK
+implement cavern for dragons OK
+implement plaza for legend OK
+implement rivaz restriction OK
+implement cavern for second NO
+implement plaza for second OK
+
+write painlands OK
+write fastland OK
+write slowland OK
+write triomes OK
+write manlands OK
+implement painlands NO
+implement fastland OK
+implement slowland OK
+implement triomes OK
+implement manlands OK
